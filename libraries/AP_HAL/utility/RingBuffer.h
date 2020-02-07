@@ -98,7 +98,11 @@ template <class T>
 class ObjectBuffer {
 public:
     ObjectBuffer(uint32_t _size) {
-        buffer = new ByteBuffer((_size * sizeof(T))+1);
+        // we set size to 1 more than requested as the byte buffer
+        // gives one less byte than requested. We round up to a full
+        // multiple of the object size so that we always get aligned
+        // elements, which makes the readptr() method possible
+        buffer = new ByteBuffer(((_size+1) * sizeof(T)));
     }
     ~ObjectBuffer(void) {
         delete buffer;
@@ -110,12 +114,12 @@ public:
         buffer->clear();
     }
 
-    // return number of objects available to be read
+    // return number of objects available to be read from the front of the queue
     uint32_t available(void) const {
         return buffer->available() / sizeof(T);
     }
 
-    // return number of objects that could be written
+    // return number of objects that could be written to the back of the queue
     uint32_t space(void) const {
         return buffer->space() / sizeof(T);
     }
@@ -125,7 +129,7 @@ public:
         return buffer->empty();
     }
 
-    // push one object
+    // push one object onto the back of the queue
     bool push(const T &object) {
         if (buffer->space() < sizeof(T)) {
             return false;
@@ -133,7 +137,7 @@ public:
         return buffer->write((uint8_t*)&object, sizeof(T)) == sizeof(T);
     }
 
-    // push N objects
+    // push N objects onto the back of the queue
     bool push(const T *object, uint32_t n) {
         if (buffer->space() < n*sizeof(T)) {
             return false;
@@ -142,14 +146,14 @@ public:
     }
     
     /*
-      throw away an object
+      throw away an object from the front of the queue
      */
     bool pop(void) {
         return buffer->advance(sizeof(T));
     }
 
     /*
-      pop earliest object off the queue
+      pop earliest object off the front of the queue
      */
     bool pop(T &object) {
         if (buffer->available() < sizeof(T)) {
@@ -182,12 +186,31 @@ public:
     }
     
     /*
-      peek copies an object out without advancing the read pointer
+      peek copies an object out from the front of the queue without advancing the read pointer
      */
     bool peek(T &object) {
         return buffer->peekbytes((uint8_t*)&object, sizeof(T)) == sizeof(T);
     }
 
+    /*
+      return a pointer to first contiguous array of available
+      objects. Return nullptr if none available
+     */
+    const T *readptr(uint32_t &n) {
+        uint32_t avail_bytes = 0;
+        const T *ret = (const T *)buffer->readptr(avail_bytes);
+        if (!ret || avail_bytes < sizeof(T)) {
+            return nullptr;
+        }
+        n = avail_bytes / sizeof(T);
+        return ret;
+    }
+
+    // advance the read pointer (discarding objects)
+    bool advance(uint32_t n) {
+        return buffer->advance(n * sizeof(T));
+    }
+    
     /* update the object at the front of the queue (the one that would
        be fetched by pop()) */
     bool update(const T &object) {
